@@ -80,9 +80,12 @@ a. 添加编译支持
 
 ### 4、编译方法
 
-​		**使用cygwin进行编译**
-​        a. 执行./bootstrap
-​        b. 执行./configure --prefix=/home/OpenOCD/CH347 --enable-ch347 --host=i686-w64-mingw32 CFLAGS='-g -o0'
-​        c. 执行make install
-​        d. 编译成功时/home/OpenOCD/CH347文件夹下会生成目标文件，其中bin目录下为OpenOCD可执行文件。
+**使用cygwin进行编译**
+
+```
+a. 执行./bootstrap
+b. 执行./configure --prefix=/home/OpenOCD/CH347 --enable-ch347 --host=i686-w64-mingw32 CFLAGS='-g -o0'
+c. 执行make install
+d. 编译成功时/home/OpenOCD/CH347文件夹下会生成目标文件，其中bin目录下为OpenOCD可执行文件。
+```
 
