@@ -1,5 +1,10 @@
 /***************************************************************************                                                                     *
- *   Driver for CH347-JTAG interface                                       *
+ *   Driver for CH347-JTAG interface V1.0                                  *
+ *                                                                         *
+ *   Copyright (C) 2022 Nanjing Qinheng Microelectronics Co., Ltd.         *
+ *   Web: http://wch.cn                                                    *
+ *   Author: WCH@TECH53 <tech@wch.cn>                                      *
+ *                                                                         *
  *   CH347 is a high-speed USB bus converter chip that provides UART, I2C  *
  *   and SPI synchronous serial ports and JTAG interface through USB bus.  * 
  *                                                                         *
@@ -30,10 +35,10 @@
 #endif
 
 /* project specific includes */
-#include <helper/replacements.h>
-#include <helper/time_support.h>
-#include <jtag/commands.h>
 #include <jtag/interface.h>
+#include <jtag/commands.h>
+#include <helper/time_support.h>
+#include <helper/replacements.h>
 
 /* system includes */
 #include <stdlib.h>
@@ -145,10 +150,6 @@ static int CH347_Write(void *oBuffer, unsigned long *ioLength)
 {
     int ret = -1;
     unsigned long wlength = *ioLength, WI;
-
-    send_bytes += *ioLength;
-
-    fwrite((char *)oBuffer, 1, *ioLength, fp);
 
     if (*ioLength >= HW_TDO_BUF_SIZE)
         wlength = HW_TDO_BUF_SIZE;
@@ -738,8 +739,6 @@ static int ch347_quit(void)
     unsigned char byte[5] = {CH347_CMD_JTAG_BIT_OP, 0x01, 0x00, 0x00, 0x00};
 
     CH347_Write(byte, &retlen);
-
-    printf("CH347 send_bytes %d.\n", send_bytes);
 
     if (DevIsOpened) {
         upCloseDev(ugIndex);
