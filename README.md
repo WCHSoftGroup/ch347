@@ -11,9 +11,13 @@ OpenOCD增加CH347配置文件，用于型号识别，操作方式：
 
 ### 1、目录tcl/target下添加CH347.cfg设备文件
 
-​         adapter driver ch347
-​         ch347 vid_pid 0x1a86 0x55dd 
-​         adapter speed 10000
+```
+    adapter driver ch347
+    ch347 vid_pid 0x1a86 0x55dd 
+    adapter speed 10000
+```
+
+
 
 ### 2、目录src/jtag/driver下添加ch347.c文件
 
