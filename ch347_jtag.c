@@ -1,4 +1,4 @@
-/***************************************************************************                                                                     *
+/***************************************************************************
  *   Driver for CH347-JTAG interface V1.0                                  *
  *                                                                         *
  *   Copyright (C) 2022 Nanjing Qinheng Microelectronics Co., Ltd.         *
@@ -6,10 +6,10 @@
  *   Author: WCH@TECH53 <tech@wch.cn>                                      *
  *                                                                         *
  *   CH347 is a high-speed USB bus converter chip that provides UART, I2C  *
- *   and SPI synchronous serial ports and JTAG interface through USB bus.  * 
+ *   and SPI synchronous serial ports and JTAG interface through USB bus.  *
  *                                                                         *
  *   The USB2.0 to JTAG scheme based on CH347 can be used to build         *
- *   customized USB high-speed JTAG debugger and other products.           *                                                          
+ *   customized USB high-speed JTAG debugger and other products.           *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -46,6 +46,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <stdint.h>
 
 #define JTAGIO_STA_OUT_TDI (0x10)
 #define JTAGIO_STA_OUT_TMS (0x02)
@@ -92,22 +93,22 @@ typedef struct _CH347_info { // 记录CH347引脚状态
 
 #ifdef _WIN32
 #include <windows.h>
-typedef int(__stdcall *pCH347OpenDevice)(unsigned long iIndex);
-typedef void(__stdcall *pCH347CloseDevice)(unsigned long iIndex);
-typedef unsigned long(__stdcall *pCH347SetTimeout)(unsigned long iIndex,        // 指定设备序号
-                                                   unsigned long iWriteTimeout, // 指定USB写出数据块的超时时间,以毫秒mS为单位,0xFFFFFFFF指定不超时(默认值)
-                                                   unsigned long iReadTimeout); // 指定USB读取数据块的超时时间,以毫秒mS为单位,0xFFFFFFFF指定不超时(默认值)
-typedef unsigned long(__stdcall *pCH347WriteData)(unsigned long iIndex,         // 指定设备序号
-                                                  void *oBuffer,                // 指向一个足够大的缓冲区,用于保存描述符
-                                                  unsigned long *ioLength);     // 指向长度单元,输入时为准备读取的长度,返回后为实际读取的长度
-typedef unsigned long(__stdcall *pCH347ReadData)(unsigned long iIndex,          // 指定设备序号
-                                                 void *oBuffer,                 // 指向一个足够大的缓冲区,用于保存描述符
-                                                 unsigned long *ioLength);      // 指向长度单元,输入时为准备读取的长度,返回后为实际读取的长度
-typedef unsigned long(__stdcall *pCH347Jtag_INIT)(unsigned long iIndex,         // 指定设备序号
-                                                  unsigned char iClockRate);    // 指向长度单元,输入时为准备读取的长度,返回后为实际读取的长度
+typedef uint64_t(__stdcall *pCH347OpenDevice)(uint32_t iIndex);
+typedef uint64_t(__stdcall *pCH347CloseDevice)(uint32_t iIndex);
+typedef uint64_t(__stdcall *pCH347SetTimeout)(uint32_t iIndex,         // 指定设备序号
+                                              uint32_t iWriteTimeout,  // 指定USB写出数据块的超时时间,以毫秒mS为单位,0xFFFFFFFF指定不超时(默认值)
+                                              uint32_t iReadTimeout);  // 指定USB读取数据块的超时时间,以毫秒mS为单位,0xFFFFFFFF指定不超时(默认值)
+typedef uint64_t(__stdcall *pCH347WriteData)(uint32_t iIndex,          // 指定设备序号
+                                             void *oBuffer,            // 指向一个足够大的缓冲区,用于保存描述符
+                                             uint32_t *ioLength);      // 指向长度单元,输入时为准备读取的长度,返回后为实际读取的长度
+typedef uint64_t(__stdcall *pCH347ReadData)(uint32_t iIndex,           // 指定设备序号
+                                            void *oBuffer,             // 指向一个足够大的缓冲区,用于保存描述符
+                                            uint32_t *ioLength);       // 指向长度单元,输入时为准备读取的长度,返回后为实际读取的长度
+typedef uint64_t(__stdcall *pCH347Jtag_INIT)(uint32_t iIndex,          // 指定设备序号
+                                             unsigned char iClockRate);// 指向长度单元,输入时为准备读取的长度,返回后为实际读取的长度
 HMODULE uhModule;
 BOOL ugOpen;
-unsigned long ugIndex;
+uint32_t ugIndex;
 pCH347OpenDevice upOpenDev;
 pCH347CloseDevice upCloseDev;
 pCH347SetTimeout upSetTimeout;
@@ -118,7 +119,7 @@ pCH347Jtag_INIT upJtagInit;
 
 bool DevIsOpened; // 设备是否打开
 bool UsbHighDev = true;
-unsigned long USBC_PACKET;
+uint32_t USBC_PACKET;
 
 _CH347_Info ch347 = {0, 0, 0, 0, ""}; // 初始化设备结构状态
 
@@ -127,11 +128,11 @@ _CH347_Info ch347 = {0, 0, 0, 0, ""}; // 初始化设备结构状态
  *  @param buf    指向一个缓冲区,放置准备转换的Hex数据
  *  @param size   指向需要转换数据的长度单元
  *
- *  @return 	  返回转换后字符串
+ *  @return       返回转换后字符串
  */
-static char *HexToString(uint8_t *buf, unsigned int size)
+static char *HexToString(uint8_t *buf, uint32_t size)
 {
-    unsigned int i;
+    uint32_t i;
     char *str = calloc(size * 2 + 1, 1);
 
     for (i = 0; i < size; i++)
@@ -144,18 +145,18 @@ static char *HexToString(uint8_t *buf, unsigned int size)
  *  @param oBuffer    指向一个缓冲区,放置准备写出的数据
  *  @param ioLength   指向长度单元,输入时为准备写出的长度,返回后为实际写出的长度
  *
- *  @return 		  写成功返回1，失败返回0
+ *  @return           写成功返回1，失败返回0
  */
-static int CH347_Write(void *oBuffer, unsigned long *ioLength)
+static int CH347_Write(void *oBuffer, uint32_t *ioLength)
 {
     int ret = -1;
-    unsigned long wlength = *ioLength, WI;
+    uint32_t wlength = *ioLength, WI;
 
     if (*ioLength >= HW_TDO_BUF_SIZE)
         wlength = HW_TDO_BUF_SIZE;
     WI = 0;
     while (1) {
-        ret = upWriteData(ugIndex, oBuffer + WI, &wlength);
+        ret = upWriteData(ugIndex, (unsigned char*)oBuffer + WI, &wlength);
         LOG_DEBUG_IO("(size=%d, buf=[%s]) -> %" PRIu32, wlength, HexToString((uint8_t *)oBuffer, wlength), wlength);
         WI += wlength;
         if (WI >= *ioLength)
@@ -172,14 +173,14 @@ static int CH347_Write(void *oBuffer, unsigned long *ioLength)
 
 /**
  * CH347_Read - CH347 读方法
- * @param oBuffer  	指向一个足够大的缓冲区,用于保存读取的数据
- * @param ioLength 	指向长度单元,输入时为准备读取的长度,返回后为实际读取的长度
+ * @param oBuffer   指向一个足够大的缓冲区,用于保存读取的数据
+ * @param ioLength  指向长度单元,输入时为准备读取的长度,返回后为实际读取的长度
  *
- * @return 			读成功返回1，失败返回0
+ * @return          读成功返回1，失败返回0
  */
-static int CH347_Read(void *oBuffer, unsigned long *ioLength)
+static int CH347_Read(void *oBuffer, uint32_t *ioLength)
 {
-    unsigned long rlength = *ioLength;
+    uint32_t rlength = *ioLength;
     // 单次读取最大允许读取4096B数据，超过则按4096B进行计算
     if (rlength > HW_TDO_BUF_SIZE)
         rlength = HW_TDO_BUF_SIZE;
@@ -196,13 +197,13 @@ static int CH347_Read(void *oBuffer, unsigned long *ioLength)
 
 /**
  * CH347_ClockTms - 功能函数，用于在TCK的上升沿改变TMS值，使其Tap状态切换
- * @param BitBangPkt 	协议包
- * @param tms 		 	需要改变的TMS值
- * @param BI		 	协议包长度
+ * @param BitBangPkt    协议包
+ * @param tms           需要改变的TMS值
+ * @param BI            协议包长度
  *
- * @return 			 	返回协议包长度
+ * @return              返回协议包长度
  */
-static unsigned long CH347_ClockTms(unsigned char *BitBangPkt, int tms, unsigned long BI)
+static uint32_t CH347_ClockTms(unsigned char *BitBangPkt, int tms, uint32_t BI)
 {
     unsigned char cmd = 0;
 
@@ -223,12 +224,12 @@ static unsigned long CH347_ClockTms(unsigned char *BitBangPkt, int tms, unsigned
 
 /**
  * CH347_IdleClock - 功能函数，确保时钟处于拉低状态
- * @param BitBangPkt 	 协议包
- * @param BI  		 	 协议包长度
+ * @param BitBangPkt     协议包
+ * @param BI             协议包长度
  *
- * @return 			 	 返回协议包长度
+ * @return               返回协议包长度
  */
-static unsigned long CH347_IdleClock(unsigned char *BitBangPkt, unsigned long BI)
+static uint32_t CH347_IdleClock(unsigned char *BitBangPkt, uint32_t BI)
 {
     unsigned char byte = 0;
     byte |= ch347.TMS ? TMS_H : TMS_L;
@@ -240,15 +241,15 @@ static unsigned long CH347_IdleClock(unsigned char *BitBangPkt, unsigned long BI
 
 /**
  * CH347_TmsChange - 功能函数，通过改变TMS的值来进行状态切换
- * @param tmsValue 		 需要进行切换的TMS值按切换顺序组成一字节数据
- * @param step 	   		 需要读取tmsValue值的位值数
- * @param skip 	   		 从tmsValue的skip位处开始计数到step
+ * @param tmsValue       需要进行切换的TMS值按切换顺序组成一字节数据
+ * @param step           需要读取tmsValue值的位值数
+ * @param skip           从tmsValue的skip位处开始计数到step
  *
  */
 static void CH347_TmsChange(const unsigned char *tmsValue, int step, int skip)
 {
     int i;
-    unsigned long BI, retlen, TxLen;
+    uint32_t BI, retlen, TxLen;
     unsigned char BitBangPkt[4096] = "";
 
     BI = CH347_CMD_HEADER;
@@ -268,13 +269,13 @@ static void CH347_TmsChange(const unsigned char *tmsValue, int step, int skip)
 
     if (!CH347_Write(BitBangPkt, &TxLen) && (TxLen != BI)) {
         LOG_ERROR("JTAG Write send usb data failure.");
-        return NULL;
+//        return NULL;
     }
 }
 
 /**
  * CH347_TMS - 由ch347_execute_queue调用
- * @param cmd 	   上层传递命令参数
+ * @param cmd      上层传递命令参数
  *
  */
 static void CH347_TMS(struct tms_command *cmd)
@@ -285,13 +286,13 @@ static void CH347_TMS(struct tms_command *cmd)
 
 /**
  * CH347_Reset - CH347 复位Tap状态函数
- * @brief 	连续六个以上TCK且TMS为高将可将状态机置为Test-Logic Reset状态
+ * @brief   连续六个以上TCK且TMS为高将可将状态机置为Test-Logic Reset状态
  *
  */
-static int CH347_Reset()
+static int CH347_Reset(void)
 {
     unsigned char BitBang[512] = "", BI, i;
-    unsigned long TxLen;
+    uint32_t TxLen;
 
     BI = CH347_CMD_HEADER;
     for (i = 0; i < 7; i++) {
@@ -321,7 +322,7 @@ static int CH347_Reset()
 static void CH347_MovePath(struct pathmove_command *cmd)
 {
     int i;
-    unsigned long BI, retlen, TxLen;
+    uint32_t BI, retlen = 0, TxLen;
     unsigned char BitBangPkt[4096] = "";
 
     BI = CH347_CMD_HEADER;
@@ -347,7 +348,7 @@ static void CH347_MovePath(struct pathmove_command *cmd)
     TxLen = BI;
     if (!CH347_Write(BitBangPkt, &TxLen) && (TxLen != BI)) {
         LOG_ERROR("JTAG Write send usb data failure.");
-        return NULL;
+//        return NULL;
     }
 }
 
@@ -374,26 +375,26 @@ static void CH347_MoveState(tap_state_t state, int skip)
 
 /**
  * CH347_WriteRead - CH347 批量读写函数
- * @param bits 			 此次进行读写数据
- * @param nb_bits 		 传入数据长度
- * @param scan			 传入数据的传输方式来确定是否执行数据读取
+ * @param bits           此次进行读写数据
+ * @param nb_bits        传入数据长度
+ * @param scan           传入数据的传输方式来确定是否执行数据读取
  *
  */
 static void CH347_WriteRead(uint8_t *bits, int nb_bits, enum scan_type scan)
 {
-    // unsigned int delay = 1000000;
+    // uint32_t delay = 1000000;
     int nb8 = nb_bits / 8;
     int nb1 = nb_bits % 8;
-    int nbfree_in_packet, i, trans = 0;
+    int i;
     bool IsRead = false;
-    uint8_t TMS_Bit, TDI_Bit;
+    uint8_t TMS_Bit, TDI_Bit = 0;
     uint8_t *tdos = calloc(1, nb_bits / 8 + 32);
     static uint8_t BitBangPkt[SF_PACKET_BUF_SIZE];
     static uint8_t byte0[SF_PACKET_BUF_SIZE];
     unsigned char temp[512] = "";
     unsigned char temp_a[512] = "";
-    unsigned long BI = 0, TxLen, RxLen, DI, DII, PktDataLen, DLen;
-    uint32_t retlen;
+    uint32_t BI = 0, TxLen, RxLen, DI, DII, PktDataLen, DLen;
+    //uint32_t retlen;
     int ret = ERROR_OK;
 
     // 最后一个TDI位将会按照位带模式输出，其nb1确保不为0，使其能在TMS变化时输出最后1bit数据
@@ -404,7 +405,7 @@ static void CH347_WriteRead(uint8_t *bits, int nb_bits, enum scan_type scan)
 
     IsRead = (scan == SCAN_IN || scan == SCAN_IO);
     DI = BI = 0;
-    while (DI < nb8) {
+    while ((int)DI < nb8) {
         // 构建数据包
         if ((nb8 - DI) > UCMDPKT_DATA_MAX_BYTES_USBHS)
             PktDataLen = UCMDPKT_DATA_MAX_BYTES_USBHS;
@@ -433,7 +434,7 @@ static void CH347_WriteRead(uint8_t *bits, int nb_bits, enum scan_type scan)
 
             if (!CH347_Write(BitBangPkt, &TxLen) && (TxLen != BI)) {
                 LOG_ERROR("CH347_WriteRead write usb data failure.");
-                return NULL;
+                return;
             }
             BI = 0;
 
@@ -442,13 +443,13 @@ static void CH347_WriteRead(uint8_t *bits, int nb_bits, enum scan_type scan)
                 RxLen = PktDataLen + CH347_CMD_HEADER;
                 if (!(ret = CH347_Read(temp, &RxLen))) {
                     LOG_ERROR("CH347_WriteRead read usb data failure.\n");
-                    return NULL;
+                    return;
                 }
 
                 if (RxLen != TxLen) {
                     if (!(ret = CH347_Read(temp_a, &TxLen))) {
                         LOG_ERROR("CH347_WriteRead read usb data failure.\n");
-                        return NULL;
+                        return;
                     }
                     memcpy(&temp[RxLen], temp_a, TxLen);
                     RxLen += TxLen;
@@ -468,7 +469,7 @@ static void CH347_WriteRead(uint8_t *bits, int nb_bits, enum scan_type scan)
 
             if (!CH347_Write(BitBangPkt, &TxLen) && (TxLen != BI)) {
                 LOG_ERROR("CH347_WriteRead send usb data failure.");
-                return NULL;
+                return;
             }
             BI = 0;
         }
@@ -479,7 +480,7 @@ static void CH347_WriteRead(uint8_t *bits, int nb_bits, enum scan_type scan)
         TxLen = BI;
         if (!CH347_Write(BitBangPkt, &TxLen) && (TxLen != BI)) {
             LOG_ERROR("CH347_WriteRead send usb data failure.");
-            return NULL;
+            return;
         }
         BI = 0;
     }
@@ -489,7 +490,7 @@ static void CH347_WriteRead(uint8_t *bits, int nb_bits, enum scan_type scan)
         BitBangPkt[BI++] = IsRead ? CH347_CMD_JTAG_BIT_OP_RD : CH347_CMD_JTAG_BIT_OP;
         DLen = (nb1 * 2) + 1;
         BitBangPkt[BI++] = (uint8_t)(DLen >> 0) & 0xFF;
-        BitBangPkt[BI++] = (uint8_t)(DLen >> 8) & 0xFF; 
+        BitBangPkt[BI++] = (uint8_t)(DLen >> 8) & 0xFF;
         TMS_Bit = TMS_L;
 
         for (i = 0; i < nb1; i++) {
@@ -512,7 +513,7 @@ static void CH347_WriteRead(uint8_t *bits, int nb_bits, enum scan_type scan)
 
         if (!CH347_Write(BitBangPkt, &TxLen) && (TxLen != BI)) {
             LOG_ERROR("CH347_WriteRead send usb data failure.");
-            return NULL;
+            return;
         }
         BI = 0;
 
@@ -534,7 +535,7 @@ static void CH347_WriteRead(uint8_t *bits, int nb_bits, enum scan_type scan)
         TxLen = BI;
         if (!CH347_Write(BitBangPkt, &TxLen) && (TxLen != BI)) {
             LOG_ERROR("CH347_WriteRead send usb data failure.");
-            return NULL;
+            return;
         }
         BI = 0;
     }
@@ -558,7 +559,7 @@ static void CH347_WriteRead(uint8_t *bits, int nb_bits, enum scan_type scan)
 
     if (!CH347_Write(BitBangPkt, &TxLen) && (TxLen != BI)) {
         LOG_ERROR("JTAG Write send usb data failure.");
-        return NULL;
+        return;
     }
 }
 
@@ -579,9 +580,9 @@ static void CH347_TableClocks(int cycles)
 
 /**
  * CH347_Scan - 切换至SHIFT-DR或者SHIFT-IR状态进行扫描
- * @param cmd 	    上层传递命令参数
+ * @param cmd       上层传递命令参数
  *
- * @return 	        成功返回ERROR_OK
+ * @return          成功返回ERROR_OK
  */
 static int CH347_Scan(struct scan_command *cmd)
 {
@@ -630,8 +631,8 @@ static int ch347_execute_queue(void)
     struct jtag_command *cmd;
     static int first_call = 1;
     int ret = ERROR_OK;
-    unsigned long TxLen = 8192;
-    unsigned char clearBuffer[8192] = "";
+    //uint32_t TxLen = 8192;
+    //unsigned char clearBuffer[8192] = "";
 
     if (first_call) {
         first_call--;
@@ -682,12 +683,12 @@ static int ch347_execute_queue(void)
  *  执行工作：
  *                初始化动态库函数
  *                打开设备
- *  @return 	  成功返回0,失败返回ERROR_FAIL
+ *  @return       成功返回0,失败返回ERROR_FAIL
  */
 static int ch347_init(void)
 {
     unsigned char clearBuffer[4096] = "";
-    unsigned long RxLen = 4096;
+    uint32_t RxLen = 4096;
 
     if (uhModule == 0) {
         uhModule = LoadLibrary("CH347DLL.DLL");
@@ -730,7 +731,7 @@ static int ch347_init(void)
  * 执行工作：
  *              复位JTAG引脚信号
  *              关闭
- *  @return 	一直返回0
+ *  @return     一直返回0
  */
 static int ch347_quit(void)
 {
@@ -751,11 +752,11 @@ static int ch347_quit(void)
 /**
  * ch347_speed - CH347 TCK频率设置
  *  @param speed 设置的频率大小
- *  @return 	 成功返回ERROR_OK，失败返回FALSE
+ *  @return      成功返回ERROR_OK，失败返回FALSE
  */
 static int ch347_speed(int speed)
 {
-    int i = 0;
+    size_t i = 0;
     int retval;
     int speed_clock[6] = {MHZ(1.875), MHZ(3.75), MHZ(7.5), MHZ(15), MHZ(30), MHZ(60)};
 
