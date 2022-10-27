@@ -4,7 +4,7 @@
 
 ​	当前支持FPGA型号主要以xilinx为主，其中具体型号如下：
 
-![image-20221027190604695](C:\Users\OIDCAT\AppData\Roaming\Typora\typora-user-images\image-20221027190604695.png)
+![image-20221027190604695](README.assets/image-20221027190604695.png)
 
 ​	使用中若遇到问题，可邮件咨询：tech@wch.cn
 
@@ -12,11 +12,11 @@
 
 ## **界面显示**
 
-![image-20221027190616419](C:\Users\OIDCAT\AppData\Roaming\Typora\typora-user-images\image-20221027190616419.png)
+![image-20221027190616419](README.assets/image-20221027190616419.png)
 
 ## **下载设置选项**
 
-![image-20221027190632574](C:\Users\OIDCAT\AppData\Roaming\Typora\typora-user-images\image-20221027190632574.png)
+![image-20221027190632574](README.assets/image-20221027190632574.png)
 
 ​	1.“选择FPGA型号”：选择本次进行操作的FPGA型号，该选择框可编辑，可根据输入内容进行支持列表匹配；
 
@@ -34,11 +34,11 @@
 
 ​	6.“下载”：BIN下载方式下将显示下载进度条，下载完毕自动隐藏，选择BIN文件下载方式时也会自定显示下载进度条；
 
-![image-20221027190647377](C:\Users\OIDCAT\AppData\Roaming\Typora\typora-user-images\image-20221027190647377.png)
+![image-20221027190647377](README.assets/image-20221027190647377.png)
 
 ## **信息输出**
 
-![image-20221027190701769](C:\Users\OIDCAT\AppData\Roaming\Typora\typora-user-images\image-20221027190701769.png)
+![image-20221027190701769](README.assets/image-20221027190701769.png)
 
 ​	1.“设备信息”：动态显示CH347-JTAG接口插拔信息
 

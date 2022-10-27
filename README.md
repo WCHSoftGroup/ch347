@@ -4,11 +4,11 @@
 
 接口示意图：
 
-![image-20221027192242216](README.assets/image-20221027192242216.png)
+![img](README.assets/6c32c76c1cff4c5aaeb09e9334cad8c7.png)
 
 应用示意图：
 
-![image-20221027192258872](README.assets/image-20221027192258872.png)
+![img](README.assets/e36f121404b04ae28f82a863b6036342.png)
 
 ## JTAG接口特点
 
