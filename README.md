@@ -1,95 +1,54 @@
-# ch347
-CH347是一款高速USB总线转接芯片，通过USB总线提供UART、I2C、SPI、JTAG等接口。
+# 简介
 
-## JTAG调试/下载
+​	   高速USB转接芯片CH347是一款集成480Mbps高速USB接口、JTAG接口、SPI接口、I2C接口、异步[UART](https://so.csdn.net/so/search?q=UART&spm=1001.2101.3001.7020)串口、GPIO接口等多种硬件接口的转换芯片。
 
-本章节介绍如何在OpenOCD中添加CH347-JTAG接口，通过OpenOCD可操作CH347进行JTAG调试或下载应用。
+接口示意图：
 
-## 为OpenOCD添加接口
+![img](README.assets/6c32c76c1cff4c5aaeb09e9334cad8c7.png)
 
-OpenOCD增加CH347配置文件，用于型号识别，操作方式：
+应用示意图：
 
-### 1、目录tcl/target下添加CH347.cfg设备文件
+![img](README.assets/e36f121404b04ae28f82a863b6036342.png)
 
-```
-    adapter driver ch347
-    ch347 vid_pid 0x1a86 0x55dd 
-    adapter speed 10000
-```
+## JTAG接口特点
 
+- 工作在 Host/Master主机模式；
+- 硬件信号：TMS、TCK、TDI、TDO和TRST；
+- 支持自定义协议的快速模式和bit-bang模式，传输速率可达30Mbit/S；
+- 提供计算机端驱动程序和USB转JTAG TAP函数库，支持二次开发；
 
+## SPI接口特点
 
-### 2、目录src/jtag/driver下添加ch347.c文件
+- 工作在 Host/Master主机模式；
+- 内置硬件DMA，支持批量数据的快速发送和读取；
+- 硬件信号：SCS0、SCS1、SCK、MISO和MOSI；
+- 工作模式：SPI模式0/SPI模式1/SPI模式2/SPI模式3；
+- 传输位序：MSB/LSB；
+- 数据结构：8位/16位传输；
+- 提供计算机端驱动程序和USB转SPI函数库，支持二次开发；
 
-​		此文件为设备驱动文件，提供JTAG core操作CH347的API接口函数
+## I2C接口特点
 
-### 3、修改配置文件
+- 工作在 Host/Master主机模式；
+- 硬件信号：SCL、SDA；
+- 支持4种传输速度：低速20KHz、标准100KHz、快速400KHz、高速750KHz；
+- 支持I2C时序参数调节；
+- 提供计算机端驱动程序和USB转I2C函数库，支持二次开发；
 
-**修改配置文件 configure.ac**
-1、OpenOCD根目录下configure.ac文件，添加CH347接口驱动支持：
+## UART接口特点
 
-    a. m4_define([USB1_ADAPTERS]中添加CH347接口
-        m4_define([USB1_ADAPTERS],
-        [[[ftdi], [MPSSE mode of FTDI based devices], [FTDI]],
-        [[ch347], [Mode 3 of the CH347 devices], [CH347]],
-        [[stlink], [ST-Link Programmer], [HLADAPTER_STLINK]],
-        [[ti_icdi], [TI ICDI JTAG Programmer], [HLADAPTER_ICDI]],
-        [[ulink], [Keil ULINK JTAG Programmer], [ULINK]],
-        [[usb_blaster_2], [Altera USB-Blaster II Compatible], [USB_BLASTER_2]],
-        [[ft232r], [Bitbang mode of FT232R based devices], [FT232R]],
-        [[vsllink], [Versaloon-Link JTAG Programmer], [VSLLINK]],
-        [[xds110], [TI XDS110 Debug Probe], [XDS110]],
-        [[cmsis_dap_v2], [CMSIS-DAP v2 Compliant Debugger], [CMSIS_DAP_USB]],
-        [[osbdm], [OSBDM (JTAG only) Programmer], [OSBDM]],
-        [[opendous], [eStick/opendous JTAG Programmer], [OPENDOUS]],
-        [[armjtagew], [Olimex ARM-JTAG-EW Programmer], [ARMJTAGEW]],
-        [[rlink], [Raisonance RLink JTAG Programmer], [RLINK]],
-        [[usbprog], [USBProg JTAG Programmer], [USBPROG]],
-        [[aice], [Andes JTAG Programmer], [AICE]]])
-    
-    b. AC_ARG_ENABLE 部分，添加内容如下：
-        AC_ARG_ENABLE([ch347],
-         AS_HELP_STRING([--enable-ch347], [Enable building support for CH347]),
-         [build_ch347=$enableval], [build_ch347=no])
-    
-    c. AS_IF 部分，添加内容如下：
-         AS_IF([test "x$build_ch347" = "xyes"], [
-          AC_DEFINE([BUILD_CH347], [1], [1 if you want CH347.])
-         ], [
-           AC_DEFINE([BUILD_CH347], [0], [0 if you don't want CH347.])
-         ])
-    
-    d. AM_CONDITIONAL 部分，添加内容如下：
-         AM_CONDITIONAL([CH347], [test "x$build_ch347" = "xyes"])
+- 硬件信号：TXD、RXD、Modem信号；
+- 支持串口波特率：1200bps~9Mbps；
+- 支持串口数据格式：8个数据位、1/2个停止位、奇/偶/无校验；
+- 支持RS485方向自动切换；
+- 支持串口自动硬件流控；
+- 提供VCP串口驱动方式/HID免驱应用方式；
+- 支持标准串口/厂商CH347动态库/HID接口形式访问串口；
 
-**修改src/jtag/interfaces.c**
+# 项目说明
 
-    a. 添加编译选项
-        #if BUILD_CH347 == 1
-        extern struct adapter_driver ch347_adapter_driver;
-        #endif
-    b. 在jtag接口列表结构体adapter_drivers中添加，此处由配置脚本来启用对应接口驱动
-        #if BUILD_CH347 == 1
-        	&ch347_adapter_driver,
-        #endif
+​    本项目将基于CH347的接口特性，逐渐增添对应的接口应用，当前已加入：
 
-**修改/src/jtag/drivers/Makefile.am**
+​	1、添加CH347-JTAG接口的Openocd可执行环境
 
-```
-a. 添加编译支持
-     if CH347
-     DRIVERFILES += %D%/ch347_jtag.c
-     endif
-```
-
-### 4、编译方法
-
-**使用cygwin进行编译**
-
-```
-a. 执行./bootstrap
-b. 执行./configure --prefix=/home/OpenOCD/CH347 --enable-ch347 --host=i686-w64-mingw32 CFLAGS='-g -o0'
-c. 执行make install
-d. 编译成功时/home/OpenOCD/CH347文件夹下会生成目标文件，其中bin目录下为OpenOCD可执行文件。
-```
-
+​	2、依托于1中openocd编写的FPGA下载工具CH347FPGADownloader，当前可实现XILINX部分FPGA的程序烧写。
