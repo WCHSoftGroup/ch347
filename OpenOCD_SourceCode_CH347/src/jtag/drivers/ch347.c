@@ -884,7 +884,7 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 		readLen += tempLength;
 		DI = BI = 0;
 	}
-	int offset = 0, bit_count = 0;
+	int offset = 0;
 	if (IsRead && totalReadLength > 0) {
 		if (ch347.pack_size == STANDARD_PACK && bits && cmd) {
 			CH347_Flush_Buffer();
@@ -897,11 +897,9 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 			 */
 			LOG_DEBUG("fields[%i].in_value[%i], offset: %d",
 				  i, cmd->fields[i].num_bits, offset);
+			num_bits = cmd->fields[i].num_bits;
 			if (cmd->fields[i].in_value) {
-				num_bits = cmd->fields[i].num_bits;
-
 				if (ch347.pack_size == LARGER_PACK) {
-					bit_count += num_bits;
 					if (cmd->fields[i].in_value)
 						bit_copy_queued(
 							&ch347.read_queue,
@@ -912,12 +910,11 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 
 					if (num_bits > 7)
 						ch347.read_idx +=
-							DIV_ROUND_UP(bit_count,
+							DIV_ROUND_UP(offset,
 								     8);
-					offset += num_bits;
 				} else {
 					uint8_t *captured = buf_set_buf(
-						readData, bit_count,
+						readData, offset,
 						malloc(DIV_ROUND_UP(num_bits,
 								    8)), 0,
 						num_bits);
@@ -938,8 +935,8 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 							num_bits);
 					free(captured);
 				}
-				bit_count += cmd->fields[i].num_bits;
 			}
+			offset += num_bits;
 		}
 	}
 
