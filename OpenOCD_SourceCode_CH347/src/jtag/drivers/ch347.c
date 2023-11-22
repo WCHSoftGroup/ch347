@@ -363,9 +363,6 @@ static int CH347_Write(void *oBuffer, unsigned long *ioLength)
 			*ioLength = 0;
 			return false;
 		}
-		LOG_DEBUG_IO("(size=%lu, buf=[%s]) -> %" PRIu32, wlength,
-			     HexToString((uint8_t *)oBuffer, wlength),
-			     (uint32_t)wlength);
 		WI += wlength;
 		if (WI >= *ioLength)
 			break;
@@ -412,8 +409,6 @@ static int CH347_Read(void *oBuffer, unsigned long *ioLength)
 		else
 			rlength = *ioLength - WI;
 	}
-	LOG_DEBUG_IO("(size=%lu, buf=[%s]) -> %" PRIu32, WI,
-		     HexToString((uint8_t *)oBuffer, WI), (uint32_t)WI);
 	*ioLength = WI;
 	return true;
 }
@@ -425,13 +420,15 @@ static void CH347_Read_Scan(UCHAR *pBuffer, uint32_t length)
 	unsigned long index = 0;
 	unsigned long read_buf_index = 0;
 	unsigned char *read_buf = NULL;
-	int dataLen = 0, i = 0; /*, this_bits = 0; */
+	int dataLen = 0, i = 0;
 
 	read_size = length;
 	RxLen = read_size;
-	index = 0;
-	read_buf_index = 0;
 	read_buf = calloc(sizeof(unsigned char), read_size);
+    if (!read_buf) {
+		LOG_ERROR("malloc failed");
+		return;
+	}
 	if (!CH347_Read(read_buf, &RxLen)) {
 		LOG_ERROR("CH347_Read read data failure.");
 		return;
@@ -885,63 +882,46 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 		DI = BI = 0;
 	}
 	int offset = 0, bit_count = 0;
-	if (IsRead && totalReadLength > 0) {
-		if (ch347.pack_size == STANDARD_PACK && bits && cmd) {
-			CH347_Flush_Buffer();
-			CH347_Read_Scan(readData, readLen);
-		}
-
-		for (i = 0; i < cmd->num_fields; i++) {
-			/* if neither in_value nor in_handler
-			 * are specified we don't have to examine this field
-			 */
-			LOG_DEBUG("fields[%i].in_value[%i], offset: %d",
-				  i, cmd->fields[i].num_bits, offset);
-			if (cmd->fields[i].in_value) {
-				num_bits = cmd->fields[i].num_bits;
-
+    if (IsRead) {
+        if (totalReadLength > 0) {
+            if (ch347.pack_size == STANDARD_PACK && bits && cmd) {
+                CH347_Flush_Buffer();
+                CH347_Read_Scan(readData, readLen);
+            }
+            for (i = 0; i < cmd->num_fields; i++) {
+                /* if neither in_value nor in_handler
+                 * are specified we don't have to examine this field
+                 */
+                LOG_DEBUG("fields[%i].in_value[%i], offset: %d", i, cmd->fields[i].num_bits, offset);
+                num_bits = cmd->fields[i].num_bits;
+                if (cmd->fields[i].in_value) {
+                    if (ch347.pack_size == LARGER_PACK) {
+                        bit_copy_queued(&ch347.read_queue, cmd->fields[i].in_value, 0, &ch347.read_buffer[ch347.read_idx], offset, num_bits);
+                    } else {
+                        uint8_t *captured = buf_set_buf(readData, bit_count,
+                                                        malloc(DIV_ROUND_UP(num_bits, 8)), 0, num_bits);
+                        if (LOG_LEVEL_IS(LOG_LVL_DEBUG_IO)) {
+                            char *char_buf = buf_to_hex_str(captured,
+                                                            (num_bits > DEBUG_JTAG_IOZ)
+                                                                ? DEBUG_JTAG_IOZ
+                                                                : num_bits);
+                            free(char_buf);
+                        }
+                        buf_cpy(captured, cmd->fields[i].in_value, num_bits);
+                        free(captured);
+                    }
+                } else {
+                	LOG_DEBUG_IO("filed skipped");
+                }
+				bit_count += num_bits;
 				if (ch347.pack_size == LARGER_PACK) {
-					bit_count += num_bits;
-					if (cmd->fields[i].in_value)
-						bit_copy_queued(
-							&ch347.read_queue,
-							cmd->fields[i].in_value,
-							0,
-							&ch347.read_buffer[ch347.read_idx],
-							offset, num_bits);
-
 					if (num_bits > 7)
-						ch347.read_idx +=
-							DIV_ROUND_UP(bit_count,
-								     8);
+                         ch347.read_idx += DIV_ROUND_UP(bit_count, 8);
 					offset += num_bits;
-				} else {
-					uint8_t *captured = buf_set_buf(
-						readData, bit_count,
-						malloc(DIV_ROUND_UP(num_bits,
-								    8)), 0,
-						num_bits);
-
-					if (LOG_LEVEL_IS(LOG_LVL_DEBUG_IO)) {
-						char *char_buf =
-							buf_to_hex_str(
-								captured,
-								(num_bits >
-								 DEBUG_JTAG_IOZ)
-								? DEBUG_JTAG_IOZ
-								: num_bits);
-						free(char_buf);
-					}
-					if (cmd->fields[i].in_value)
-						buf_cpy(captured,
-							cmd->fields[i].in_value,
-							num_bits);
-					free(captured);
 				}
-				bit_count += cmd->fields[i].num_bits;
-			}
-		}
-	}
+            }
+        }
+    }
 
 	tempIndex = ch347.buffer_idx;
 	for (i = 0; i < CH347_CMD_HEADER; i++)
@@ -1120,9 +1100,9 @@ static int ch347_init(void)
 	if (!swd_mode) {
 		USBC_PACKET = USBC_PACKET_USBHS;
 		/* ch347 init */
-		ch347.TCK = 0;
-		ch347.TMS = 0;
-		ch347.TDI = 0;
+		ch347.TCK = TCK_L;
+		ch347.TMS = TMS_H;
+		ch347.TDI = TDI_L;
 		ch347.TRST = TRST_H;
 		ch347.buffer_idx = 0;
 
@@ -1230,7 +1210,7 @@ static int ch347_speed(int speed)
 	};
 
 	if (!swd_mode) {
-		for (i = 0; i < (sizeof(speed_clock) / sizeof(int)); i++) {
+		for (i = 0; i < ARRAY_SIZE(speed_clock); i++) {
 			if ((speed >= speed_clock[i]) &&
 			    (speed <= speed_clock[i + 1])) {
 				clockRate = i + 1;
