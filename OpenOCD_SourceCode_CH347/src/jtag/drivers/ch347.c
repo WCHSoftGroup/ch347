@@ -897,31 +897,21 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 			 */
 			LOG_DEBUG("fields[%i].in_value[%i], offset: %d",
 				  i, cmd->fields[i].num_bits, offset);
+			num_bits = cmd->fields[i].num_bits;
 			if (cmd->fields[i].in_value) {
-				num_bits = cmd->fields[i].num_bits;
-
 				if (ch347.pack_size == LARGER_PACK) {
-					bit_count += num_bits;
-					if (cmd->fields[i].in_value)
-						bit_copy_queued(
-							&ch347.read_queue,
-							cmd->fields[i].in_value,
-							0,
-							&ch347.read_buffer[ch347.read_idx],
-							offset, num_bits);
-
-					if (num_bits > 7)
-						ch347.read_idx +=
-							DIV_ROUND_UP(bit_count,
-								     8);
-					offset += num_bits;
+					bit_copy_queued(
+						&ch347.read_queue,
+						cmd->fields[i].in_value,
+						0,
+						&ch347.read_buffer[ch347.read_idx],
+						offset, num_bits);
 				} else {
 					uint8_t *captured = buf_set_buf(
 						readData, bit_count,
 						malloc(DIV_ROUND_UP(num_bits,
 								    8)), 0,
 						num_bits);
-
 					if (LOG_LEVEL_IS(LOG_LVL_DEBUG_IO)) {
 						char *char_buf =
 							buf_to_hex_str(
@@ -932,13 +922,19 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 								: num_bits);
 						free(char_buf);
 					}
-					if (cmd->fields[i].in_value)
-						buf_cpy(captured,
-							cmd->fields[i].in_value,
-							num_bits);
+					buf_cpy(captured,
+						cmd->fields[i].in_value,
+						num_bits);
 					free(captured);
 				}
-				bit_count += cmd->fields[i].num_bits;
+			}else {
+				LOG_DEBUG_IO("cmd->fields with no data");
+			}
+			bit_count += cmd->fields[i].num_bits;
+			if (ch347.pack_size == LARGER_PACK) {
+				if (num_bits > 7)
+                    			ch347.read_idx += DIV_ROUND_UP(bit_count, 8);
+				offset += num_bits;
 			}
 		}
 	}
@@ -1120,9 +1116,9 @@ static int ch347_init(void)
 	if (!swd_mode) {
 		USBC_PACKET = USBC_PACKET_USBHS;
 		/* ch347 init */
-		ch347.TCK = 0;
-		ch347.TMS = 0;
-		ch347.TDI = 0;
+		ch347.TCK = TCK_L;
+		ch347.TMS = TMS_H;
+		ch347.TDI = TDI_L;
 		ch347.TRST = TRST_H;
 		ch347.buffer_idx = 0;
 
@@ -1230,7 +1226,7 @@ static int ch347_speed(int speed)
 	};
 
 	if (!swd_mode) {
-		for (i = 0; i < (sizeof(speed_clock) / sizeof(int)); i++) {
+		for (i = 0; i < ARRAY_SIZE(speed_clock); i++) {
 			if ((speed >= speed_clock[i]) &&
 			    (speed <= speed_clock[i + 1])) {
 				clockRate = i + 1;
