@@ -20,7 +20,7 @@
  *                                                                         *
  *            _____________                                                *
  *           |             |____JTAG/SWD (TDO,TDI,TMS,TCK,TRST)            *
- *      USB__|    CH347T   |                                               *
+ *      USB__|   CH347T/F  |                                               *
  *           |_____________|____UART(TXD1,RXD1,RTS1,CTS1,DTR1)             *
  *            ______|______                                                *
  *           |             |                                               *
@@ -234,8 +234,8 @@ bool ugOpen;
 unsigned long ugIndex;
 struct libusb_device_handle *ch347_handle;
 
-static const uint16_t ch347_vids[] = {0x1a86, 0};
-static const uint16_t ch347_pids[] = {0x55dd, 0};
+static const uint16_t ch347_vids[] = {0x1a86, 0x1a86};
+static const uint16_t ch347_pids[] = {0x55dd, 0x55de};
 
 static uint32_t CH347OpenDevice(uint64_t iIndex)
 {
@@ -933,7 +933,7 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 			bit_count += cmd->fields[i].num_bits;
 			if (ch347.pack_size == LARGER_PACK) {
 				if (num_bits > 7)
-                    			ch347.read_idx += DIV_ROUND_UP(bit_count, 8);
+                    ch347.read_idx += DIV_ROUND_UP(bit_count, 8);
 				offset += num_bits;
 			}
 		}
@@ -1102,11 +1102,12 @@ static int ch347_init(void)
 		}
 	}
 	DevIsOpened = CH347OpenDevice(ugIndex);
+	if (DevIsOpened == -1) {
 #elif defined(__linux__)
 	DevIsOpened = CH347OpenDevice(ugIndex);
 	ugIndex = DevIsOpened;
+	if (DevIsOpened == false) {
 #endif
-	if (DevIsOpened == -1) {
 		LOG_ERROR("CH347 Open Error.");
 		return ERROR_FAIL;
 	} else {
