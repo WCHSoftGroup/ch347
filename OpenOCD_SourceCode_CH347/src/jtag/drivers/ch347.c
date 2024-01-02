@@ -447,9 +447,8 @@ static void CH347_Read_Scan(UCHAR *pBuffer, uint32_t length)
 		} else if (read_buf[index] == CH347_CMD_JTAG_BIT_OP_RD) {
 			dataLen = read_buf[++index] & 0xFF;
 			dataLen += (read_buf[++index] & 0xFF) << 8;
-
 			for (i = 0; i < dataLen; i++) {
-				if (read_buf[index + 1 + i] & 1)
+				if (read_buf[index + 1 + i] == 0x01)
 					*(pBuffer + read_buf_index) |= (1 << i);
 				else
 					*(pBuffer + read_buf_index) &= ~(1 << i);
@@ -781,7 +780,7 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 	unsigned long BI = 0, DI, DII, PktDataLen, DLen = 0, tempIndex,
 		totalReadLength = 0, tempLength = 0;
 	if (ch347.pack_size == LARGER_PACK) {
-		if ((ch347.read_count >= (USBC_PACKET_USBHS_SINGLE * 1)))
+		if ((ch347.read_count >= (1024 * 1)))
 			CH347_Flush_Buffer();
 	} else {
 		CH347_Flush_Buffer();
@@ -890,7 +889,6 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 			CH347_Flush_Buffer();
 			CH347_Read_Scan(readData, readLen);
 		}
-
 		for (i = 0; i < cmd->num_fields; i++) {
 			/* if neither in_value nor in_handler
 			 * are specified we don't have to examine this field
@@ -898,6 +896,7 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 			LOG_DEBUG("fields[%i].in_value[%i], offset: %d",
 				  i, cmd->fields[i].num_bits, offset);
 			num_bits = cmd->fields[i].num_bits;
+			bit_count += num_bits;
 			if (cmd->fields[i].in_value) {
 				if (ch347.pack_size == LARGER_PACK) {
 					bit_copy_queued(
@@ -906,6 +905,8 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 						0,
 						&ch347.read_buffer[ch347.read_idx],
 						offset, num_bits);
+					if (num_bits > 7)
+                    	ch347.read_idx += DIV_ROUND_UP(bit_count, 8);
 				} else {
 					uint8_t *captured = buf_set_buf(
 						readData, bit_count,
@@ -930,10 +931,7 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 			}else {
 				LOG_DEBUG_IO("cmd->fields with no data");
 			}
-			bit_count += cmd->fields[i].num_bits;
 			if (ch347.pack_size == LARGER_PACK) {
-				if (num_bits > 7)
-                    ch347.read_idx += DIV_ROUND_UP(bit_count, 8);
 				offset += num_bits;
 			}
 		}
@@ -1207,7 +1205,6 @@ static bool CH347Jtag_INIT(uint64_t iIndex, uint8_t iClockRate)
 		else
 			return Check_Speed(iIndex, iClockRate - 2);
 	}
-
 	return Check_Speed(iIndex, iClockRate);
 }
 
