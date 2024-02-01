@@ -172,7 +172,7 @@ typedef struct _CH347_SWD_CONTEXT {
 	uint8_t *ch347_cmd_buf;
 } CH347_SWD_CONTEXT;
 static CH347_SWD_CONTEXT ch347_swd_context;
-static bool swd_mode;
+static bool swd_mode = false;
 #pragma pack()
 
 #ifdef _WIN32
@@ -648,58 +648,31 @@ static void CH347_TMS(struct tms_command *cmd)
 static int ch347_reset(int trst, int srst)
 {
 	LOG_DEBUG_IO("reset trst: %i srst %i", trst, srst);
-#if 1
 	unsigned char BitBang[512] = "", BII, i;
 	unsigned long TxLen;
-
-	BII = CH347_CMD_HEADER;
-	for (i = 0; i < 7; i++) {
+	if (!swd_mode){
+		BII = CH347_CMD_HEADER;
+		for (i = 0; i < 7; i++) {
+			BitBang[BII++] = TMS_H | TDI_L | TCK_L;
+			BitBang[BII++] = TMS_H | TDI_L | TCK_H;
+		}
 		BitBang[BII++] = TMS_H | TDI_L | TCK_L;
-		BitBang[BII++] = TMS_H | TDI_L | TCK_H;
+
+		ch347.TCK = TCK_L;
+		ch347.TDI = TDI_L;
+		ch347.TMS = 0;
+
+		BitBang[0] = CH347_CMD_JTAG_BIT_OP;
+		BitBang[1] = BII - CH347_CMD_HEADER;
+		BitBang[2] = 0;
+
+		TxLen = BII;
+
+		if (!CH347_Write(BitBang, &TxLen) && (TxLen != BII)) {
+			LOG_ERROR("JTAG_Init send usb data failure.");
+			return false;
+		}
 	}
-	BitBang[BII++] = TMS_H | TDI_L | TCK_L;
-
-	ch347.TCK = TCK_L;
-	ch347.TDI = TDI_L;
-	ch347.TMS = 0;
-
-	BitBang[0] = CH347_CMD_JTAG_BIT_OP;
-	BitBang[1] = BII - CH347_CMD_HEADER;
-	BitBang[2] = 0;
-
-	TxLen = BII;
-
-	if (!CH347_Write(BitBang, &TxLen) && (TxLen != BII)) {
-		LOG_ERROR("JTAG_Init send usb data failure.");
-		return false;
-	}
-#else
-	if (!swd_mode && trst == 0) {
-
-		unsigned long int BI = 0;
-
-		CH347_In_Buffer(CH347_CMD_JTAG_BIT_OP);
-		CH347_In_Buffer(0x01);
-		CH347_In_Buffer(0);
-
-		ch347.TRST = 0;
-		CH347_IdleClock(BI);
-
-		CH347_Flush_Buffer();
-
-		Sleep(50);
-
-		CH347_In_Buffer(CH347_CMD_JTAG_BIT_OP);
-		CH347_In_Buffer(0x01);
-		CH347_In_Buffer(0);
-
-		ch347.TRST = 1;
-		CH347_IdleClock(BI);
-
-		CH347_Flush_Buffer();
-		return ERROR_OK;
-	}
-#endif
 	return ERROR_OK;
 }
 
