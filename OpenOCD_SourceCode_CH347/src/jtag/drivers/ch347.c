@@ -234,8 +234,8 @@ bool ugOpen;
 unsigned long ugIndex;
 struct libusb_device_handle *ch347_handle;
 
-static const uint16_t ch347_vids[] = {0x1a86, 0x1a86};
-static const uint16_t ch347_pids[] = {0x55dd, 0x55de};
+static const uint16_t ch347_vids[] = {0x1a86, 0x1a86, 0x1a86};
+static const uint16_t ch347_pids[] = {0x55dd, 0x55de, 0x55e7};
 
 static uint32_t CH347OpenDevice(uint64_t iIndex)
 {
@@ -456,7 +456,7 @@ static void CH347_Read_Scan(UCHAR *pBuffer, uint32_t length)
 			read_buf_index += 1;
 			index += dataLen + 1;
 		} else {
-			LOG_ERROR("readbuf read_commend error");
+			// LOG_ERROR("readbuf read_commend error");
 			*(pBuffer + read_buf_index) = read_buf[index];
 			read_buf_index++;
 			index++;
@@ -753,7 +753,7 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 	unsigned long BI = 0, DI, DII, PktDataLen, DLen = 0, tempIndex,
 		totalReadLength = 0, tempLength = 0;
 	if (ch347.pack_size == LARGER_PACK) {
-		if ((ch347.read_count >= (1024 * 1)))
+		if ((ch347.read_count >= (510 * 1)))
 			CH347_Flush_Buffer();
 	} else {
 		CH347_Flush_Buffer();
@@ -869,7 +869,8 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 			LOG_DEBUG("fields[%i].in_value[%i], offset: %d",
 				  i, cmd->fields[i].num_bits, offset);
 			num_bits = cmd->fields[i].num_bits;
-			bit_count += num_bits;
+			if (ch347.pack_size == LARGER_PACK)
+				bit_count += num_bits;
 			if (cmd->fields[i].in_value) {
 				if (ch347.pack_size == LARGER_PACK) {
 					bit_copy_queued(
@@ -881,6 +882,7 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 					if (num_bits > 7)
                     	ch347.read_idx += DIV_ROUND_UP(bit_count, 8);
 				} else {
+					num_bits = cmd->fields[i].num_bits;
 					uint8_t *captured = buf_set_buf(
 						readData, bit_count,
 						malloc(DIV_ROUND_UP(num_bits,
@@ -906,6 +908,8 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 			}
 			if (ch347.pack_size == LARGER_PACK) {
 				offset += num_bits;
+			}else{
+				bit_count += cmd->fields[i].num_bits;
 			}
 		}
 	}
