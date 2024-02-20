@@ -172,7 +172,7 @@ typedef struct _CH347_SWD_CONTEXT {
 	uint8_t *ch347_cmd_buf;
 } CH347_SWD_CONTEXT;
 static CH347_SWD_CONTEXT ch347_swd_context;
-static bool swd_mode;
+static bool swd_mode = false;
 #pragma pack()
 
 #ifdef _WIN32
@@ -234,8 +234,8 @@ bool ugOpen;
 unsigned long ugIndex;
 struct libusb_device_handle *ch347_handle;
 
-static const uint16_t ch347_vids[] = {0x1a86, 0x1a86};
-static const uint16_t ch347_pids[] = {0x55dd, 0x55de};
+static const uint16_t ch347_vids[] = {0x1a86, 0x1a86, 0x1a86};
+static const uint16_t ch347_pids[] = {0x55dd, 0x55de, 0x55e7};
 
 static uint32_t CH347OpenDevice(uint64_t iIndex)
 {
@@ -447,9 +447,8 @@ static void CH347_Read_Scan(UCHAR *pBuffer, uint32_t length)
 		} else if (read_buf[index] == CH347_CMD_JTAG_BIT_OP_RD) {
 			dataLen = read_buf[++index] & 0xFF;
 			dataLen += (read_buf[++index] & 0xFF) << 8;
-
 			for (i = 0; i < dataLen; i++) {
-				if (read_buf[index + 1 + i] & 1)
+				if (read_buf[index + 1 + i] == 0x01)
 					*(pBuffer + read_buf_index) |= (1 << i);
 				else
 					*(pBuffer + read_buf_index) &= ~(1 << i);
@@ -457,7 +456,7 @@ static void CH347_Read_Scan(UCHAR *pBuffer, uint32_t length)
 			read_buf_index += 1;
 			index += dataLen + 1;
 		} else {
-			LOG_ERROR("readbuf read_commend error");
+			// LOG_ERROR("readbuf read_commend error");
 			*(pBuffer + read_buf_index) = read_buf[index];
 			read_buf_index++;
 			index++;
@@ -649,58 +648,31 @@ static void CH347_TMS(struct tms_command *cmd)
 static int ch347_reset(int trst, int srst)
 {
 	LOG_DEBUG_IO("reset trst: %i srst %i", trst, srst);
-#if 1
 	unsigned char BitBang[512] = "", BII, i;
 	unsigned long TxLen;
-
-	BII = CH347_CMD_HEADER;
-	for (i = 0; i < 7; i++) {
+	if (!swd_mode){
+		BII = CH347_CMD_HEADER;
+		for (i = 0; i < 7; i++) {
+			BitBang[BII++] = TMS_H | TDI_L | TCK_L;
+			BitBang[BII++] = TMS_H | TDI_L | TCK_H;
+		}
 		BitBang[BII++] = TMS_H | TDI_L | TCK_L;
-		BitBang[BII++] = TMS_H | TDI_L | TCK_H;
+
+		ch347.TCK = TCK_L;
+		ch347.TDI = TDI_L;
+		ch347.TMS = 0;
+
+		BitBang[0] = CH347_CMD_JTAG_BIT_OP;
+		BitBang[1] = BII - CH347_CMD_HEADER;
+		BitBang[2] = 0;
+
+		TxLen = BII;
+
+		if (!CH347_Write(BitBang, &TxLen) && (TxLen != BII)) {
+			LOG_ERROR("JTAG_Init send usb data failure.");
+			return false;
+		}
 	}
-	BitBang[BII++] = TMS_H | TDI_L | TCK_L;
-
-	ch347.TCK = TCK_L;
-	ch347.TDI = TDI_L;
-	ch347.TMS = 0;
-
-	BitBang[0] = CH347_CMD_JTAG_BIT_OP;
-	BitBang[1] = BII - CH347_CMD_HEADER;
-	BitBang[2] = 0;
-
-	TxLen = BII;
-
-	if (!CH347_Write(BitBang, &TxLen) && (TxLen != BII)) {
-		LOG_ERROR("JTAG_Init send usb data failure.");
-		return false;
-	}
-#else
-	if (!swd_mode && trst == 0) {
-
-		unsigned long int BI = 0;
-
-		CH347_In_Buffer(CH347_CMD_JTAG_BIT_OP);
-		CH347_In_Buffer(0x01);
-		CH347_In_Buffer(0);
-
-		ch347.TRST = 0;
-		CH347_IdleClock(BI);
-
-		CH347_Flush_Buffer();
-
-		Sleep(50);
-
-		CH347_In_Buffer(CH347_CMD_JTAG_BIT_OP);
-		CH347_In_Buffer(0x01);
-		CH347_In_Buffer(0);
-
-		ch347.TRST = 1;
-		CH347_IdleClock(BI);
-
-		CH347_Flush_Buffer();
-		return ERROR_OK;
-	}
-#endif
 	return ERROR_OK;
 }
 
@@ -781,7 +753,7 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 	unsigned long BI = 0, DI, DII, PktDataLen, DLen = 0, tempIndex,
 		totalReadLength = 0, tempLength = 0;
 	if (ch347.pack_size == LARGER_PACK) {
-		if ((ch347.read_count >= (USBC_PACKET_USBHS_SINGLE * 1)))
+		if ((ch347.read_count >= (510 * 1)))
 			CH347_Flush_Buffer();
 	} else {
 		CH347_Flush_Buffer();
@@ -890,7 +862,6 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 			CH347_Flush_Buffer();
 			CH347_Read_Scan(readData, readLen);
 		}
-
 		for (i = 0; i < cmd->num_fields; i++) {
 			/* if neither in_value nor in_handler
 			 * are specified we don't have to examine this field
@@ -898,6 +869,8 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 			LOG_DEBUG("fields[%i].in_value[%i], offset: %d",
 				  i, cmd->fields[i].num_bits, offset);
 			num_bits = cmd->fields[i].num_bits;
+			if (ch347.pack_size == LARGER_PACK)
+				bit_count += num_bits;
 			if (cmd->fields[i].in_value) {
 				if (ch347.pack_size == LARGER_PACK) {
 					bit_copy_queued(
@@ -906,7 +879,10 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 						0,
 						&ch347.read_buffer[ch347.read_idx],
 						offset, num_bits);
+					if (num_bits > 7)
+                    	ch347.read_idx += DIV_ROUND_UP(bit_count, 8);
 				} else {
+					num_bits = cmd->fields[i].num_bits;
 					uint8_t *captured = buf_set_buf(
 						readData, bit_count,
 						malloc(DIV_ROUND_UP(num_bits,
@@ -930,11 +906,10 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 			}else {
 				LOG_DEBUG_IO("cmd->fields with no data");
 			}
-			bit_count += cmd->fields[i].num_bits;
 			if (ch347.pack_size == LARGER_PACK) {
-				if (num_bits > 7)
-                    ch347.read_idx += DIV_ROUND_UP(bit_count, 8);
 				offset += num_bits;
+			}else{
+				bit_count += cmd->fields[i].num_bits;
 			}
 		}
 	}
@@ -1207,7 +1182,6 @@ static bool CH347Jtag_INIT(uint64_t iIndex, uint8_t iClockRate)
 		else
 			return Check_Speed(iIndex, iClockRate - 2);
 	}
-
 	return Check_Speed(iIndex, iClockRate);
 }
 
