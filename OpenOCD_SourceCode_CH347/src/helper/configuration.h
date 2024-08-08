@@ -12,7 +12,7 @@
 #define OPENOCD_HELPER_CONFIGURATION_H
 
 #include <helper/command.h>
-
+#include <stdio.h>
 int parse_cmdline_args(struct command_context *cmd_ctx,
 		int argc, char *argv[]);
 
