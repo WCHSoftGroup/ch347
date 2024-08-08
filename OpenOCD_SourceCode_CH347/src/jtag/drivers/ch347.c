@@ -93,7 +93,6 @@
 					      package length */
 #define CH347_CMD_HEADER             3     /* Protocol header length */
 
-#define CH347_CMD_HEADER 3 /* 协议包头长度 */
 /* Protocol transmission format: CMD (1 byte)+Length (2 bytes)+Data */
 #define CH347_CMD_INFO_RD            0xCA /* Parameter acquisition, used to
 					     obtain firmware version,
