@@ -61,11 +61,12 @@
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
-
+#define INVALID_HANDLE_VALUE ((HANDLE)(LONG_PTR)-1)
 #define JTAGIO_STA_OUT_TDI  (0x10)
 #define JTAGIO_STA_OUT_TMS  (0x02)
 #define JTAGIO_STA_OUT_TCK  (0x01)
 #define JTAGIO_STA_OUT_TRST (0x20)
+#define JTAGIO_STA_OUT_SRST (0x40)
 #define TDI_H               JTAGIO_STA_OUT_TDI
 #define TDI_L               0
 #define TMS_H               JTAGIO_STA_OUT_TMS
@@ -74,11 +75,13 @@
 #define TCK_L               0
 #define TRST_H              JTAGIO_STA_OUT_TRST
 #define TRST_L              0
+#define SRST_H              JTAGIO_STA_OUT_SRST
+#define SRST_L              0
 
 #define KHZ(n) ((n)*UINT64_C(1000))
 #define MHZ(n) ((n)*UINT64_C(1000000))
 #define GHZ(n) ((n)*UINT64_C(1000000000))
-
+#define DEVICE_MAX_NUMBER            16
 #define HW_TDO_BUF_SIZE              4096
 #define SF_PACKET_BUF_SIZE           51200 /* Command packet length */
 #define UCMDPKT_DATA_MAX_BYTES_USBHS 507   /* The data length contained in each
@@ -132,6 +135,7 @@ typedef struct _CH347_info /* Record the CH347 pin status */
 	int TDI;
 	int TCK;
 	int TRST;
+	int SRST;
 
 	int buffer_idx;
 	uint8_t buffer[SF_PACKET_BUF_SIZE];
@@ -174,9 +178,32 @@ typedef struct _CH347_SWD_CONTEXT {
 static CH347_SWD_CONTEXT ch347_swd_context;
 static bool swd_mode = false;
 #pragma pack()
-
+static int ch347_srst_enable(void);
 #ifdef _WIN32
 #include <windows.h>
+
+//Device Information 
+typedef struct _DEV_INFOR{
+	UCHAR    iIndex;                 // Current open number
+	UCHAR    DevicePath[MAX_PATH];   // Device link name, used for CreateFile
+	UCHAR    UsbClass;               // 0:CH347_USB_CH341, 2:CH347_USB_HID,3:CH347_USB_VCP
+	UCHAR    FuncType;               // 0:CH347_FUNC_UART,1:CH347_FUNC_SPI_IIC,2:CH347_FUNC_JTAG_IIC
+	CHAR     DeviceID[64];           // USB\VID_xxxx&PID_xxxx
+	UCHAR    ChipMode;               // Chip Mode, 0:Mode0(UART0/1); 1:Mode1(Uart1+SPI+IIC); 2:Mode2(HID Uart1+SPI+IIC) 3:Mode3(Uart1+Jtag+IIC)
+	HANDLE   DevHandle;              // Device handle
+	USHORT   BulkOutEndpMaxSize;     // Upload endpoint size
+	USHORT   BulkInEndpMaxSize;      // The size of the downstream endpoint
+	UCHAR    UsbSpeedType;           // USB Speed type,0:FS,1:HS,2:SS
+	UCHAR    CH347IfNum;             // USB interface number: 0:UART,1:SPI/IIC/JTAG/GPIO
+	UCHAR    DataUpEndp;             // The endpoint address
+	UCHAR    DataDnEndp;             // The endpoint address
+	CHAR     ProductString[64];      // Product string in USB descriptor
+	CHAR     ManufacturerString[64]; // Manufacturer string in USB descriptor
+	ULONG    WriteTimeout;           // USB write timeout
+	ULONG    ReadTimeout;            // USB read timeout
+	CHAR     FuncDescStr[64];        // Interface functions
+	UCHAR    FirewareVer;            // Firmware version
+}mDeviceInforS,*mPDeviceInforS;
 
 typedef int(__stdcall  * pCH347OpenDevice)(unsigned long iIndex);
 
@@ -214,6 +241,10 @@ typedef unsigned long(__stdcall * pCH347Jtag_INIT)(
 	unsigned char iClockRate);    /* Pointing to the length unit, the input
 					 is the length to be read, and the
 					 return is the actual read length */
+
+typedef int(__stdcall  * pCH347GetSerialNumber)(unsigned long iIndex, unsigned char *SerialNumberStr);
+typedef unsigned long(__stdcall  * pCH347GetDeviceInfor)(unsigned long iIndex, mDeviceInforS *DevInformation);
+
 HMODULE uhModule;
 BOOL ugOpen;
 unsigned long ugIndex;
@@ -222,6 +253,8 @@ pCH347CloseDevice CH347CloseDevice;
 pCH347SetTimeout CH347SetTimeout;
 pCH347ReadData CH347ReadData;
 pCH347WriteData CH347WriteData;
+pCH347GetSerialNumber CH347GetSerialNumber;
+pCH347GetDeviceInfor CH347GetDeviceInfor;
 /* pCH347Jtag_INIT CH347Jtag_INIT; */
 #elif defined(__linux__)
 
@@ -229,22 +262,57 @@ pCH347WriteData CH347WriteData;
 
 #define CH347_EPOUT 0x06u
 #define CH347_EPIN  0x86u
-
+int g_bus_num = 0;
+int g_device_addr = 0;
 bool ugOpen;
 unsigned long ugIndex;
 struct libusb_device_handle *ch347_handle;
-
 static const uint16_t ch347_vids[] = {0x1a86, 0x1a86, 0x1a86};
 static const uint16_t ch347_pids[] = {0x55dd, 0x55de, 0x55e7};
 
 static uint32_t CH347OpenDevice(uint64_t iIndex)
 {
-	if (jtag_libusb_open(ch347_vids, ch347_pids,
-			     &ch347_handle, NULL) != ERROR_OK) {
+	libusb_device** devs;
+	int i = 0;
+	ssize_t cnt;
+	int ret;
+	struct libusb_device *dev;
+	struct libusb_device_descriptor desc;
+	
+	if (libusb_init(NULL) < 0) {
 		return false;
-	} else {
-		return true;
 	}
+	if (g_bus_num != 0 && g_device_addr != 0) {
+		cnt = libusb_get_device_list(NULL, &devs);
+		if (cnt < 0) return false;
+		while ((dev = devs[i++]) != NULL)  {
+			if (g_bus_num != 0 && g_device_addr != 0 && (libusb_get_bus_number(dev) != g_bus_num || libusb_get_device_address(dev) != g_device_addr))
+    			continue;
+			if (libusb_open(dev, &ch347_handle) < 0){
+				return false;
+			}else{
+				return true;
+			}
+		}
+	}else{
+		if (jtag_libusb_open(ch347_vids, ch347_pids,
+			     &ch347_handle, NULL) != ERROR_OK) {
+			return false;
+		} else {
+			ret = libusb_get_device_descriptor(dev, &desc);
+			if (ret < 0) {
+				LOG_ERROR("Failed to get device descriptor: '%s'\n", libusb_error_name(ret));
+			}
+			if (desc.idProduct != 0x55dd){
+				if (ERROR_OK != ch347_srst_enable()) {
+					LOG_ERROR("ch347 enable srst Error.");
+				}
+			}
+			
+			return true;
+		}
+	}
+	return true;
 }
 
 static bool CH347WriteData(uint64_t iIndex, uint8_t *data, uint64_t *length)
@@ -254,7 +322,7 @@ static bool CH347WriteData(uint64_t iIndex, uint8_t *data, uint64_t *length)
 				     CH347_EPOUT,
 				     (char *)data,
 				     *length,
-				     100, &tmp);
+				     2000, &tmp);
 	*length = tmp;
 
 	if (!ret)
@@ -272,7 +340,7 @@ static bool CH347ReadData(uint64_t iIndex, uint8_t *data, uint64_t *length)
 				    CH347_EPIN,
 				    (char *)data,
 				    size,
-				    100, &tmp);
+				    2000, &tmp);
 
 	*length = tmp;
 	if (!ret)
@@ -290,6 +358,7 @@ static bool CH347CloseDevice(uint64_t iIndex)
 #endif
 
 _CH347_Info ch347;
+char serialString[128] = "";
 
 static int ch347_swd_run_queue(void);
 /* swd init func */
@@ -352,6 +421,7 @@ static char *HexToString(uint8_t *buf, uint32_t size)
 static int CH347_Write(void *oBuffer, unsigned long *ioLength)
 {
 	int ret = -1;
+	char *log_buf = NULL;
 	unsigned long wlength = *ioLength, WI;
 	if (*ioLength >= HW_TDO_BUF_SIZE)
 		wlength = HW_TDO_BUF_SIZE;
@@ -364,7 +434,7 @@ static int CH347_Write(void *oBuffer, unsigned long *ioLength)
 			return false;
 		}
 		LOG_DEBUG_IO("(size=%lu, buf=[%s]) -> %" PRIu32, wlength,
-			     HexToString((uint8_t *)oBuffer, wlength),
+			     (log_buf = HexToString((uint8_t *)oBuffer, wlength)),
 			     (uint32_t)wlength);
 		WI += wlength;
 		if (WI >= *ioLength)
@@ -373,6 +443,7 @@ static int CH347_Write(void *oBuffer, unsigned long *ioLength)
 			wlength = HW_TDO_BUF_SIZE;
 		else
 			wlength = *ioLength - WI;
+		free(log_buf);
 	}
 
 	*ioLength = WI;
@@ -390,6 +461,7 @@ static int CH347_Write(void *oBuffer, unsigned long *ioLength)
 static int CH347_Read(void *oBuffer, unsigned long *ioLength)
 {
 	unsigned long rlength = *ioLength, WI;
+	char* log_buf = NULL;
 	/* The maximum allowable reading for a single read is 4096B of data.
 	   If it exceeds the allowable reading limit, it will be calculated as
 	   4096B */
@@ -413,9 +485,50 @@ static int CH347_Read(void *oBuffer, unsigned long *ioLength)
 			rlength = *ioLength - WI;
 	}
 	LOG_DEBUG_IO("(size=%lu, buf=[%s]) -> %" PRIu32, WI,
-		     HexToString((uint8_t *)oBuffer, WI), (uint32_t)WI);
+		    (log_buf = HexToString((uint8_t *)oBuffer, WI)), (uint32_t)WI);
 	*ioLength = WI;
+	free(log_buf);
 	return true;
+}
+
+static int ch347_srst_out(unsigned char status)
+{
+	unsigned long int BI = 0;
+	unsigned char byte = 0;
+	unsigned char cmdPacket[4] = "";
+	cmdPacket[BI++] = CH347_CMD_JTAG_BIT_OP;
+	cmdPacket[BI++] = 0x01;
+	cmdPacket[BI++] = 0;
+	byte = ch347.TCK | ch347.TDI | ch347.TMS | (ch347.SRST =
+						    (status ? SRST_H : SRST_L));
+	cmdPacket[BI++] = byte;
+
+	if (!CH347_Write(cmdPacket, &BI)) {
+		LOG_ERROR("SRST set failure.");
+		return ERROR_FAIL;
+	}
+	return ERROR_OK;
+}
+
+static void CH347_Sleep(int us)
+{
+	LOG_DEBUG_IO("%s(us=%d)", __func__, us);
+	jtag_sleep(us);
+}
+
+static int ch347_srst_enable(void)
+{
+	uint8_t srst_enable[11] = {0xe2, 0x08, 0x00, 0x00, 0x81, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+	unsigned long wLen = 11;
+    unsigned long rLen = 4;
+	CH347_Write(srst_enable, &wLen);
+	CH347_Read(srst_enable, &rLen);
+	if (srst_enable[1] != 0x01) {
+		LOG_ERROR("ch347 enable srst Error.");
+		return ERROR_FAIL;
+	}
+	ch347_srst_out(SRST_H);
+	return ERROR_OK;
 }
 
 static void CH347_Read_Scan(UCHAR *pBuffer, uint32_t length)
@@ -567,15 +680,15 @@ static unsigned long CH347_ClockTms(int tms, unsigned long BI)
 
 	BI += 2;
 
-	data = cmd | TDI_L | TCK_L | TRST_H;
+	data = cmd | TDI_L | TCK_L | TRST_H | SRST_H;
 	CH347_In_Buffer(data);
-	data = cmd | TDI_L | TCK_H | TRST_H;
+	data = cmd | TDI_L | TCK_H | TRST_H | SRST_H;
 	CH347_In_Buffer(data);
 	ch347.TMS = cmd;
 	ch347.TDI = TDI_L;
 	ch347.TCK = TCK_H;
 	ch347.TRST = TRST_H;
-
+	ch347.SRST = SRST_H;
 	return BI;
 }
 
@@ -592,6 +705,7 @@ static unsigned long CH347_IdleClock(unsigned long BI)
 	byte |= ch347.TMS ? TMS_H : TMS_L;
 	byte |= ch347.TDI ? TDI_H : TDI_L;
 	byte |= ch347.TRST ? TRST_H : TRST_L;
+	byte |= ch347.SRST ? SRST_H : SRST_L;
 	BI++;
 	CH347_In_Buffer(byte);
 
@@ -650,13 +764,13 @@ static int ch347_reset(int trst, int srst)
 	LOG_DEBUG_IO("reset trst: %i srst %i", trst, srst);
 	unsigned char BitBang[512] = "", BII, i;
 	unsigned long TxLen;
-	if (!swd_mode){
+	if (!swd_mode) {
 		BII = CH347_CMD_HEADER;
 		for (i = 0; i < 7; i++) {
-			BitBang[BII++] = TMS_H | TDI_L | TCK_L;
-			BitBang[BII++] = TMS_H | TDI_L | TCK_H;
+			BitBang[BII++] = TMS_H | TDI_L | TCK_L | SRST_H;
+			BitBang[BII++] = TMS_H | TDI_L | TCK_H | SRST_H;
 		}
-		BitBang[BII++] = TMS_H | TDI_L | TCK_L;
+		BitBang[BII++] = TMS_H | TDI_L | TCK_L | SRST_H;
 
 		ch347.TCK = TCK_L;
 		ch347.TDI = TDI_L;
@@ -839,10 +953,10 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 			if ((i + 1) == nb1)
 				TMS_Bit = TMS_H;
 
-			CH347_In_Buffer(TMS_Bit | TDI_Bit | TCK_L | TRST_H);
-			CH347_In_Buffer(TMS_Bit | TDI_Bit | TCK_H | TRST_H);
+			CH347_In_Buffer(TMS_Bit | TDI_Bit | TCK_L | TRST_H | SRST_H);
+			CH347_In_Buffer(TMS_Bit | TDI_Bit | TCK_H | TRST_H | SRST_H);
 		}
-		CH347_In_Buffer(TMS_Bit | TDI_Bit | TCK_L | TRST_H);
+		CH347_In_Buffer(TMS_Bit | TDI_Bit | TCK_L | TRST_H | SRST_H);
 	}
 
 	ch347.TMS = TMS_Bit;
@@ -990,12 +1104,6 @@ static int CH347_Scan(struct scan_command *cmd)
 	return ret;
 }
 
-static void CH347_Sleep(int us)
-{
-	LOG_DEBUG_IO("%s(us=%d)", __func__, us);
-	jtag_sleep(us);
-}
-
 static int ch347_execute_queue(void)
 {
 	struct jtag_command *cmd;
@@ -1056,7 +1164,11 @@ static int ch347_init(void)
 {
 #ifdef _WIN32
 	if (uhModule == 0) {
+		#ifdef _WIN64
+		uhModule = LoadLibrary("CH347DLLA64.DLL");
+		#else
 		uhModule = LoadLibrary("CH347DLL.DLL");
+		#endif
 		if (uhModule) {
 			CH347OpenDevice = (pCH347OpenDevice)GetProcAddress(
 				uhModule, "CH347OpenDevice");
@@ -1068,16 +1180,38 @@ static int ch347_init(void)
 				uhModule, "CH347WriteData");
 			CH347SetTimeout = (pCH347SetTimeout)GetProcAddress(
 				uhModule, "CH347SetTimeout");
+			CH347GetSerialNumber = (pCH347GetSerialNumber)GetProcAddress(
+				uhModule, "CH347GetSerialNumber");
+			CH347GetDeviceInfor = (pCH347GetDeviceInfor)GetProcAddress(
+				uhModule, "CH347GetDeviceInfor");
 			if (CH347OpenDevice == NULL || CH347CloseDevice == NULL
 			    || CH347SetTimeout == NULL || CH347ReadData == NULL
-			    || CH347WriteData == NULL) {
+			    || CH347WriteData == NULL || CH347GetSerialNumber == NULL) {
 				LOG_ERROR("Jtag_init error ");
 				return ERROR_FAIL;
 			}
 		}
 	}
-	DevIsOpened = CH347OpenDevice(ugIndex);
-	if (DevIsOpened == -1) {
+	char dev_info[64];
+	if (strcmp(serialString, "") != 0){
+		for (int i = 0; i < DEVICE_MAX_NUMBER; i++) {
+			DevIsOpened = CH347OpenDevice(i);
+			if (DevIsOpened != INVALID_HANDLE_VALUE) {
+				CH347GetSerialNumber(i, &dev_info);
+				if (strcmp(serialString, dev_info) == 0) {
+					ugIndex = i;
+					break;
+				}else{
+					memset(&dev_info, 0, sizeof(dev_info));
+				}
+			}else{
+				break;
+			}
+		}
+	}else{
+		DevIsOpened = CH347OpenDevice(ugIndex);
+	}
+	if (DevIsOpened == INVALID_HANDLE_VALUE) {
 #elif defined(__linux__)
 	DevIsOpened = CH347OpenDevice(ugIndex);
 	ugIndex = DevIsOpened;
@@ -1087,8 +1221,21 @@ static int ch347_init(void)
 		return ERROR_FAIL;
 	} else {
 		LOG_INFO("CH347 Open Succ.");
-	}
 
+	}	
+#ifdef _WIN32
+	mDeviceInforS devInfo;
+	CH347GetDeviceInfor(ugIndex, &devInfo);
+	char* pidstr = strstr(devInfo.DeviceID, "PID_");
+	if (pidstr){
+		pidstr += 4;
+	}
+	if (strncmp("55DD", pidstr, 4) != 0) {
+		if (ch347_srst_enable() != ERROR_OK) {
+			LOG_ERROR("ch347 enable srst Error.");
+		}
+	}
+#endif
 	if (!swd_mode) {
 		USBC_PACKET = USBC_PACKET_USBHS;
 		/* ch347 init */
@@ -1096,6 +1243,7 @@ static int ch347_init(void)
 		ch347.TMS = TMS_H;
 		ch347.TDI = TDI_L;
 		ch347.TRST = TRST_H;
+		ch347.SRST = SRST_H;
 		ch347.buffer_idx = 0;
 
 		memset(&ch347.buffer, 0, SF_PACKET_BUF_SIZE);
@@ -1129,7 +1277,7 @@ static int ch347_init(void)
 static int ch347_quit(void)
 {
 	unsigned long retlen = 4;
-	uint8_t byte[4] = {CH347_CMD_JTAG_BIT_OP, 0x01, 0x00, ch347.TRST};
+	uint8_t byte[4] = {CH347_CMD_JTAG_BIT_OP, 0x01, 0x00, ch347.TRST | ch347.SRST};
 	if (!swd_mode) {
 		CH347_Write(byte, &retlen);
 		bit_copy_discard(&ch347.read_queue);
@@ -1155,7 +1303,7 @@ static bool Check_Speed(uint64_t iIndex, uint8_t iClockRate)
 	cmdBuf[i++] = iClockRate;
 
 	for (j = 0; j < 4; j++)
-		cmdBuf[i++] = ch347.TCK | ch347.TDI | ch347.TMS | ch347.TRST;
+		cmdBuf[i++] = ch347.TCK | ch347.TDI | ch347.TMS | ch347.TRST | ch347.SRST;
 
 	unsigned long int mLength = i;
 	if (!CH347WriteData(iIndex, cmdBuf, &mLength) || (mLength != i))
@@ -1258,7 +1406,6 @@ static int ch347_trst_out(unsigned char status)
 		LOG_ERROR("TRST set failure.");
 		return ERROR_FAIL;
 	}
-
 	return ERROR_OK;
 }
 
@@ -1276,6 +1423,33 @@ COMMAND_HANDLER(ch347_trst)
 	return ERROR_OK;
 }
 
+COMMAND_HANDLER(ch347_set_index)
+{
+	LOG_INFO("ch347_index is %d", atoi(CMD_ARGV[0]));
+	ugIndex = atoi(CMD_ARGV[0]);
+	
+	return ERROR_OK;
+}
+/* Obtaining the device sn is a follow-up function. Temporarily unavailable */
+COMMAND_HANDLER(ch347_set_ProductString)
+{
+	LOG_INFO("ch347_set_ProductString is %s", CMD_ARGV[0]);
+	strcpy(serialString, CMD_ARGV[0]);
+	return ERROR_OK;
+}
+
+COMMAND_HANDLER(ch347_set_busdev)
+{
+#ifdef __linux__
+	if (CMD_ARGC < 2)
+		return ERROR_COMMAND_SYNTAX_ERROR;	
+	LOG_INFO("ch347_set_busdev is %d and %d", atoi(CMD_ARGV[0]), atoi(CMD_ARGV[1]));
+	g_bus_num = atoi(CMD_ARGV[0]);
+	g_device_addr = atoi(CMD_ARGV[1]);
+	return ERROR_OK;
+#endif
+}
+
 static const struct command_registration ch347_subcommand_handlers[] = {
 	{
 		.name = "vid_pid",
@@ -1285,12 +1459,34 @@ static const struct command_registration ch347_subcommand_handlers[] = {
 		.usage = "",
 	},
 	{
+		.name = "ch347_index",
+		.handler = &ch347_set_index,
+		.mode = COMMAND_ANY,
+		.help = "set deivice index of the CH347",
+		.usage = "",
+	},
+	{
+		.name = "product_string",
+		.handler = &ch347_set_ProductString,
+		.mode = COMMAND_ANY,
+		.help = "set deivice product string of the CH347",
+		.usage = "",
+	},
+	{
 		.name = "jtag_ntrst_delay",
 		.handler = &ch347_trst,
 		.mode = COMMAND_ANY,
 		.help = "set the trst of the CH347 device that is used as JTAG",
-		.usage = "[milliseconds]",
+		.usage = "",
 	},
+	{
+		.name = "busdev-num",
+		.handler = &ch347_set_busdev,
+		.mode = COMMAND_ANY,
+		.help = "set bus_num and device_addr of the CH347",
+		.usage = "",
+	},
+	
 
 	COMMAND_REGISTRATION_DONE};
 
