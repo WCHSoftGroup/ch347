@@ -298,6 +298,7 @@ static uint32_t CH347OpenDevice(uint64_t iIndex)
 				 &ch347_handle, NULL) != ERROR_OK) {
 			return false;
 		} else {
+			dev = libusb_get_device(ch347_handle);
 			ret = libusb_get_device_descriptor(dev, &desc);
 			if (ret < 0) {
 				LOG_ERROR("Failed to get device descriptor: '%s'\n", libusb_error_name(ret));
