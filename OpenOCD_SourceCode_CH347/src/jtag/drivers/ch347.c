@@ -952,10 +952,10 @@ static void CH347_WriteRead(struct scan_command *cmd, uint8_t *bits,
 			if ((i + 1) == nb1)
 				TMS_Bit = TMS_H;
 
-			CH347_In_Buffer(TMS_Bit | TDI_Bit | TCK_L | TRST_H);
-			CH347_In_Buffer(TMS_Bit | TDI_Bit | TCK_H | TRST_H);
+			CH347_In_Buffer(TMS_Bit | TDI_Bit | TCK_L | TRST_H | SRST_H);
+			CH347_In_Buffer(TMS_Bit | TDI_Bit | TCK_H | TRST_H | SRST_H);
 		}
-		CH347_In_Buffer(TMS_Bit | TDI_Bit | TCK_L | TRST_H);
+		CH347_In_Buffer(TMS_Bit | TDI_Bit | TCK_L | TRST_H | SRST_H);
 	}
 
 	ch347.TMS = TMS_Bit;
