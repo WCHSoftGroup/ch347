@@ -1237,8 +1237,6 @@ static int ch347_init(void)
 		 /* CH347SetTimeout(ugIndex, 500, 500); */
 
 		 tap_set_state(TAP_RESET);
-	 } else { /* swd init */
-		 CH347SWD_INIT(ugIndex, 1);
 	 }
 	 return 0;
 }
@@ -1347,7 +1345,15 @@ static int ch347_speed(int speed)
 				 }
 			 }
 		 }
-	 }
+	 } else {
+        if (speed > MHZ(5) ) {
+            CH347SWD_INIT(ugIndex, 0);  //5Mhz
+        } else if (speed <= MHZ(5) && speed >= MHZ(1)) {
+            CH347SWD_INIT(ugIndex, 1);  //1Mhz
+        } else {
+            CH347SWD_INIT(ugIndex, 2);  //500Khz
+        }
+     }
 	 return ERROR_OK;
 }
 
