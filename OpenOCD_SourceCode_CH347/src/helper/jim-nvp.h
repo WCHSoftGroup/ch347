@@ -20,7 +20,7 @@
 #define OPENOCD_HELPER_JIM_NVP_H
 
 #include <jim.h>
-
+#include <stdio.h>
 /** Name Value Pairs, aka: NVP
  *   -  Given a string - return the associated int.
  *   -  Given a number - return the associated string.
