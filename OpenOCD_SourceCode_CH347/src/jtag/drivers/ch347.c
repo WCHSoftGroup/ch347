@@ -255,6 +255,7 @@ struct ch347_swd_context {
 
 static struct ch347_swd_context ch347_swd_context;
 static bool swd_mode;
+unsigned long ugIndex = 0;
 static uint16_t default_ch347_vids[] = {DEFAULT_VENDOR_ID, DEFAULT_VENDOR_ID, DEFAULT_VENDOR_ID, 0};
 static uint16_t default_ch347_pids[] = {DEFAULT_CH347T_PRODUCT_ID,
 	DEFAULT_CH347F_PRODUCT_ID, DEFAULT_OTHER_PRODUCT_ID, 0};
@@ -350,7 +351,6 @@ typedef unsigned long(__stdcall  * pCH347GetDeviceInfor)(unsigned long iIndex, m
 typedef unsigned long(__stdcall  * pCH347GetVersion)(unsigned long iIndex, unsigned char* iDriverVer, unsigned char* iDLLVer, unsigned char* ibcdDevice, unsigned char* iChipType);
 
 HMODULE uhModule = 0;
-unsigned long ugIndex = 0;
 pCH347OpenDevice CH347OpenDevice;
 pCH347CloseDevice CH347CloseDevice;
 pCH347SetTimeout CH347SetTimeout;
@@ -387,10 +387,13 @@ static int ch347_open_device(void)
 			}
 		}
 	} else {
+		LOG_INFO("ugIndex == %d", ugIndex);
 		DevIsOpened = CH347OpenDevice(ugIndex);
 	}
 	if (DevIsOpened == INVALID_HANDLE_VALUE) {
 		return ERROR_FAIL;
+	} else {
+		LOG_INFO("CH347 open success");
 	}
 	mDeviceInforS devInfo;
 	CH347GetDeviceInfor(ugIndex, &devInfo);
@@ -486,12 +489,10 @@ static int ch347_quit(void)
 {
 	// on close set the LED on, because the state without JTAG is on
 	ch347_activity_led_set(LED_ON);
-	if (ch347.chip_variant == CH347T && !swd_mode) {
-		ch347.srst_pin = SRST_H;
-		ch347.trst_pin = TRST_H;
-		if (ch347_cmd_start_next(CH347_CMD_JTAG_BIT_OP) != ERROR_OK || ch347_scratchpad_add_pin_byte() != ERROR_OK) {
-			LOG_WARNING("SRST pin reset to high filed");
-		}
+	ch347.srst_pin = SRST_H;
+	ch347.trst_pin = TRST_H;
+	if (ch347_cmd_start_next(CH347_CMD_JTAG_BIT_OP) != ERROR_OK || ch347_scratchpad_add_pin_byte() != ERROR_OK) {
+		LOG_WARNING("SRST pin reset to high filed");
 	}
 	int retval = ch347_cmd_transmit_queue();
 	CH347CloseDevice(ugIndex);
@@ -594,7 +595,6 @@ static int ch347_open_device(void)
 	} else {
 		ch347.use_bitwise_mode = false;
 	}
-
 	if (ch347.chip_variant == CH347T) {
 		if (swd_mode) {
 			ch347.swclk_5mhz_supported = ch347_device_descriptor.bcdDevice >= 0x544;
@@ -705,12 +705,10 @@ static int ch347_quit(void)
 {
 	// on close set the LED on, because the state without JTAG is on
 	ch347_activity_led_set(LED_ON);
-	if (ch347.chip_variant == CH347T && !swd_mode) {
-		ch347.srst_pin = SRST_H;
-		ch347.trst_pin = TRST_H;
-		if (ch347_cmd_start_next(CH347_CMD_JTAG_BIT_OP) != ERROR_OK || ch347_scratchpad_add_pin_byte() != ERROR_OK) {
-			LOG_WARNING("SRST pin reset to high filed");
-		}
+	ch347.srst_pin = SRST_H;
+	ch347.trst_pin = TRST_H;
+	if (ch347_cmd_start_next(CH347_CMD_JTAG_BIT_OP) != ERROR_OK || ch347_scratchpad_add_pin_byte() != ERROR_OK) {
+		LOG_WARNING("SRST pin reset to high filed");
 	}
 	int retval = ch347_cmd_transmit_queue();
 	jtag_libusb_close(ch347_handle);
@@ -1099,7 +1097,7 @@ static int ch347_cmd_transmit_queue(void)
 
 		list_for_each_entry(cmd, &ch347.cmd_queue, queue) {
 			total_len += CH347_CMD_HEADER + cmd->write_data_len;
-			total_tdo_count += cmd->tdo_bit_count;
+			total_tdo_count += (cmd->tdo_bit_count + CH347_CMD_HEADER);
 			// don't exceed max length or max TDO bit count
 			if (total_len >= ch347.max_len || total_tdo_count >= HW_TDO_BUF_SIZE)
 				break;
@@ -1726,25 +1724,35 @@ static int ch347_reset(int trst, int srst)
 	if (swd_mode) {
 		if (trst)
 			LOG_WARNING("Asserting TRST not supported in SWD mode!");
-		return ERROR_OK;
 	}
 
 	int retval = ch347_cmd_start_next(CH347_CMD_JTAG_BIT_OP);
-	if (retval != ERROR_OK)
+	if (retval != ERROR_OK) {
+		LOG_DEBUG_IO("ch347_cmd_start_next failed");
 		return retval;
+	}
 
 	ch347.trst_pin = trst ? TRST_L : TRST_H;
 	ch347.srst_pin = srst ? SRST_L : SRST_H;
 	retval = ch347_scratchpad_add_pin_byte();
-	if (retval != ERROR_OK)
+	if (retval != ERROR_OK) {
+		LOG_DEBUG_IO("ch347_scratchpad_add_pin_byte failed");
 		return retval;
+	}
 
 	retval = ch347_scratchpad_add_idle_clock();
-	if (retval != ERROR_OK)
+	if (retval != ERROR_OK) {
+		LOG_DEBUG_IO("ch347_scratchpad_add_idle_clock failed");
 		return retval;
+	}	
 
-	return ch347_cmd_transmit_queue();
+	retval = ch347_cmd_transmit_queue();
+	if (retval != ERROR_OK) {
+		LOG_DEBUG_IO("ch347_cmd_transmit_queue failed");
+	}
+	return retval;
 }
+
 
 /**
  * @brief Flushes the command buffer and sleeps for a specific timespan
@@ -1918,6 +1926,12 @@ static int ch347_swd_init_cmd(uint8_t clock_divisor)
  */
 static int ch347_speed_set(int speed_index)
 {
+	if (ch347.chip_variant != CH347T) {
+		if (ch347_srst_enable() != ERROR_OK) {
+			LOG_ERROR("ch347 enable srst Error.");
+		}
+	}
+
 	if (swd_mode)
 		return ch347_swd_init_cmd(speed_index);
 
@@ -1926,12 +1940,7 @@ static int ch347_speed_set(int speed_index)
 		LOG_ERROR("Couldn't set CH347 speed");
 		return retval;
 	}
-
-	if (ch347.chip_variant != CH347T) {
-		if (ch347_srst_enable() != ERROR_OK) {
-			LOG_ERROR("ch347 enable srst Error.");
-		}
-	}
+	
 	return ERROR_OK;
 }
 
@@ -2076,6 +2085,14 @@ COMMAND_HANDLER(ch347_handle_device_desc_command)
 	return ERROR_OK;
 }
 
+COMMAND_HANDLER(ch347_handle_device_index_command)
+{
+	if (CMD_ARGC != 1)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+	ugIndex = atoi(CMD_ARGV[0]);
+	return ERROR_OK;
+}
+
 /**
  * @brief The command handler for configuring which GPIO pin is used as activity LED
  *
@@ -2116,6 +2133,13 @@ static const struct command_registration ch347_subcommand_handlers[] = {
 		.mode = COMMAND_CONFIG,
 		.help = "set the USB device description of the CH347 device",
 		.usage = "description_string",
+	},
+	{
+		.name = "device_index",
+		.handler = &ch347_handle_device_index_command,
+		.mode = COMMAND_CONFIG,
+		.help = "set the USB device index of the CH347 device",
+		.usage = "device_index",
 	},
 	{
 		.name = "activity_led",
@@ -2176,6 +2200,13 @@ static int ch347_init(void)
 				LOG_ERROR("Jtag_init error ");
 				return ERROR_FAIL;
 			}
+		} else {
+			#ifdef _WIN64
+			LOG_ERROR("Jtag_init error : Not find CH347DLLA64.DLL");
+			#else
+			LOG_ERROR("Jtag_init error : Not find CH347DLL.DLL");
+			#endif		
+			return ERROR_FAIL;
 		}
 	}
 	#endif
@@ -2186,8 +2217,6 @@ static int ch347_init(void)
 		LOG_ERROR("CH347 open error");
 		return retval;
 	}
-
-	LOG_DEBUG_IO("CH347 open success");
 
 	// CH347 JTAG init
 	ch347.tck_pin = TCK_L;
